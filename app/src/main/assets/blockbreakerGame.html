@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Block Breaker</title>
+    <link rel="stylesheet" type="text/css" href="gameCSS.css">
+    </head>
+<body>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        var canvas;
+        var canvasContext;
+        var canvasX;
+        var canvasY;
+        var mouseIsDown = 0;
+
+        var ballX;
+        var ballY;
+        var ballDX;
+        var ballDY;
+        var ballRadius = 10;
+
+        var thePaddleX;
+
+        var PADDLE_WIDTH = 100;
+        var PADDLE_HEIGHT = 10;
+
+        var lastPt=null;
+        var gameOverScreenBad = false;
+        var gameOverScreenGood = false;
+        var titleScreen = true;
+
+        var theBrickRows = 5;
+        var theBrickColumns = 10;
+        var depletedBricks = 0;
+        var brickCap = 45;
+        var theBrickWidth = 0;
+        var theBrickHeight = 0;
+        var theBrickPadding = 0;
+        var theBrickOffsetTop = 0;
+        var theBrickOffsetLeft = 0;
+        var theBricks = [];
+
+        var imageToDraw = new Image();
+        var orangeBlock = new Image();
+        var redBlock = new Image();
+        var blueBall = new Image();
+        var paddleImg = new Image();
+        var BGimg = new Image();
+
+        var score = 0;
+        var lives = 3;
+        var level = 1;
+
+        //Audio
+        //For use on brick hits, two needed in case of hits before sound is finished playing
+        beep1 = new Audio("beep.wav");
+        beep2 = new Audio("beep.wav");
+        var beepSwitcher = true; //Controls alternating which beep noise is played
+
+        //For use on paddle hit
+        boing = new Audio("boing.wav");
+        titleScreenMusic = new Audio("TitleScreenMusic.mp3");
+        gameMusic = new Audio("GameMusic.mp3");
+
+
+
+
+        window.onload = function() {
+        canvas = document.getElementById('gameCanvas');
+        canvasContext = canvas.getContext('2d');
+
+
+
+        init();
+
+        //Now that we have access to the initialised canvas establish object sizes and speeds
+        //relative to the game screen
+        //Brick settings
+        theBrickWidth = canvas.width/12;
+        theBrickHeight = canvas.height/24;
+        theBrickPadding = canvas.width/134; // canvas width /12 (brick width) * 11 (spaces between bricks)
+        theBrickOffsetTop = canvas.width/10; //Allow space for score display
+        theBrickOffsetLeft = canvas.width/67;
+
+        //Ball settings
+        //Baseline speed + level scaling
+        ballDX = canvas.width/150 + (level - 1);
+        ballDY = -canvas.height/150 + (level - 1);
+        ballRadius = canvas.height/48; //Ball diamater will be equal to brick height
+        ballY = (canvas.height/5) * 4;
+
+        //Paddle size settings
+        PADDLE_WIDTH = canvas.width/6;
+        PADDLE_HEIGHT = canvas.height/24;
+
+        canvasX = canvas.width/2;
+        canvasY = canvas.height-30;
+
+
+
+        thePaddleX = (canvas.width-PADDLE_WIDTH)/2;
+
+        if(!gameOverScreenBad)
+        {
+            render();
+        }
+
+        }
+
+        function render() {
+
+
+            if(gameOverScreenBad) {
+                styleText('red', '30px Courier New', 'center', 'middle');
+                canvasContext.fillText("Game Over!!!!", canvas.width/2, canvas.height/2);
+                canvasContext.fillText("Tap to continue ...", canvas.width/2, canvas.height/2 + 40);
+                depletedBricks = 0;
+                score = 0;
+                lives = 3;
+                level = 1;
+                bricksRefresh();
+                return;
+            }
+
+            if(gameOverScreenGood) {
+                console.log("GOOD END EXECUTED");
+                styleText('green', '30px Courier New', 'center', 'middle');
+                canvasContext.fillText("LEVEL COMPLETE!", canvas.width/2, canvas.height/2);
+                canvasContext.fillText("Tap to continue ...", canvas.width/2, canvas.height/2 + 40);
+                depletedBricks = 0;
+                bricksRefresh();
+                return;
+            }
+
+            if(titleScreen){
+                titleScreenMusic.play();
+                //Background image
+                canvasContext.drawImage(BGimg,0, 0, canvas.width, canvas.height);
+                styleText('green', '60px Courier New', 'center', 'middle');
+                canvasContext.fillText("BLOCK BREAKER", canvas.width/2, canvas.height/10);
+                styleText('blue', '30px Courier New', 'center', 'middle');
+                canvasContext.fillText("Use the paddle to stop the ball from falling off the screen)", canvas.width/2, canvas.height/2);
+                canvasContext.fillText("and break most of the blocks!", canvas.width/2, canvas.height/2 + 40);
+                canvasContext.fillText("(Touch, click or arrow keys to start + control)", canvas.width/2, canvas.height/2 + 80);
+                return;
+            }
+
+
+            canvasContext.clearRect(0, 0, canvas.width, canvas.height);
+            canvasContext.drawImage(BGimg,0, 0, canvas.width, canvas.height);
+            renderBricks();
+            renderPaddle(thePaddleX, canvas.height-PADDLE_HEIGHT, PADDLE_WIDTH, PADDLE_HEIGHT, "red");
+            renderBall(ballX, ballY, ballRadius,"green");
+            styleText('#005A31', '16px impact', 'left', 'middle');
+            canvasContext.fillText("Score: "+score, 8, 20);
+            canvasContext.fillText("Level: "+level, 8, 40);
+            styleText('#005A31', '16px impact', 'left', 'middle');
+            canvasContext.fillText("Lives: "+lives, canvas.width-65, 20);
+            collisionDetection();
+
+            if(ballX + ballDX > canvas.width-ballRadius || ballX + ballDX < ballRadius) {
+                ballDX = -ballDX;
+            }
+            if(ballY + ballDY < ballRadius)
+            {
+                ballDY = -ballDY;
+            }
+            else if(ballY + ballDY > canvas.height-ballRadius-PADDLE_HEIGHT) {
+                //If the ball is hitting the paddle
+                if(ballX > thePaddleX && ballX < thePaddleX + PADDLE_WIDTH)
+                {
+                    //If the ball hit the paddle on the far left side
+                    if(ballX > thePaddleX && ballX < thePaddleX + (PADDLE_WIDTH/4)){
+
+                        //If ball moving right
+                        if(ballDX > 0){
+                            ballDX = (ballDX/1.5); //Slow it down in the X direction
+                        }
+                        else{
+                            ballDX = (ballDX*1.5); //Otherwise, speed it up in the X dirction
+                        }
+
+
+                    }
+                    else if(ballX > (thePaddleX + PADDLE_WIDTH) - (PADDLE_WIDTH/4) && ballX < thePaddleX + PADDLE_WIDTH){
+                        //If ball moving right
+                        if(ballDX > 0){
+                            ballDX = (ballDX*1.5); //Speed it up in the X direction
+                        }
+                        else{
+                            ballDX = (ballDX/1.5); //Otherwise, slow it down in the X dirction
+                        }
+                    }
+                    ballDY = -ballDY;
+                    boing.play();
+                }
+
+                //If the ball is hitting the bottom of the screen
+                if(ballY + ballDY > canvas.height-ballRadius)
+                {
+                    lives--;
+                    if(lives == 0)
+                    {
+                        gameOverScreenBad = true;
+                    }
+                    else {
+                        // Reset Ball and Paddle
+                        ballX = (canvas.width/2)-ballRadius;
+                        ballY = (canvas.height/5)*4;
+                        ballDX = canvas.width/150 + (level - 1);
+                        ballDY = -canvas.height/150 + (level - 1);
+                        thePaddleX = (canvas.width-PADDLE_WIDTH)/2;
+                    }
+                }
+            }
+
+            ballX += ballDX;
+            ballY += ballDY;
+
+            requestAnimationFrame(render);
+
+        }
+
+        function renderBall(centerX, centerY, radius, drawColor) {
+
+            canvasContext.drawImage(blueBall,centerX, centerY, ballRadius, ballRadius);
+        }
+
+        function renderPaddle(leftX,topY, width,height, drawColor) {
+
+            canvasContext.drawImage(paddleImg, leftX, topY, PADDLE_WIDTH, PADDLE_HEIGHT);
+        }
+
+        function renderRectTP(leftX,topY, width,height, drawColor) {
+            canvasContext.beginPath();
+            canvasContext.rect(leftX,topY, width,height);
+            canvasContext.strokeStyle = drawColor;
+            canvasContext.stroke();
+            canvasContext.closePath();
+        }
+
+        function initBricks()
+        {
+            for(col=0; col<theBrickColumns; col++)
+            {
+                theBricks[col] = [];
+                for(row=0; row<theBrickRows; row++)
+                {
+                    var randNumber = Math.floor((Math.random() * 2) + 0); //Generate random value for brick status
+
+                    //If there will be no brick here, record it in the empty bricks value
+                    if(randNumber == 0){
+                        depletedBricks++
+                    }
+                    theBricks[col][row] = { x: 0, y: 0, status: randNumber };
+                    console.log(depletedBricks);
+                }
+            }
+        }
+
+        function bricksRefresh()
+        {
+            for(col=0; col<theBrickColumns; col++)
+            {
+                for(row=0; row<theBrickRows; row++)
+                {
+                    if(level <= 2)
+                    {
+                        var difficultyMod = 2;
+                    }
+
+                    if(level > 2)
+                    {
+                        var difficultyMod = 3;
+                    }
+
+                    if(level > 4)
+                    {
+                        var difficultyMod = 4;
+                    }
+
+                    var randNumber = Math.floor((Math.random() * difficultyMod) + 0); //Generate random value for brick status
+
+                    //If there will be no brick here, record it in the empty bricks value
+                    if(randNumber == 0){
+                        depletedBricks++
+                    }
+                    theBricks[col][row] = { x: 0, y: 0, status: randNumber };
+                    console.log("GOT HERE");
+                }
+            }
+        }
+
+        function renderBrick(leftX,topY, width,height, drawColor) {
+            //canvasContext.beginPath();
+            //canvasContext.fillStyle = drawColor;
+            //canvasContext.fillRect(leftX,topY, width,height);
+            //canvasContext.closePath();
+            if(drawColor == 1)
+            {
+                canvasContext.drawImage(imageToDraw,leftX, topY, theBrickWidth, theBrickHeight );
+            }
+
+            if(drawColor == 2)
+            {
+                canvasContext.drawImage(orangeBlock,leftX, topY, theBrickWidth, theBrickHeight );
+            }
+
+            if(drawColor == 3)
+            {
+                canvasContext.drawImage(redBlock,leftX, topY, theBrickWidth, theBrickHeight );
+            }
+
+        }
+
+        function renderBricks() {
+            for(col=0; col<theBrickColumns; col++) {
+                for(row=0; row<theBrickRows; row++) {
+                    if(theBricks[col][row].status != 0) {
+                        var theBrickX = (col*(theBrickWidth+theBrickPadding))+theBrickOffsetLeft;
+                        var theBrickY = (row*(theBrickHeight+theBrickPadding))+theBrickOffsetTop;
+                        theBricks[col][row].x = theBrickX;
+                        theBricks[col][row].y = theBrickY;
+                        renderBrick(theBrickX, theBrickY, theBrickWidth, theBrickHeight, theBricks[col][row].status);
+                    }
+                }
+            }
+        }
+
+        function playBeeper() {
+            if(beepSwitcher){
+                beep1.play();
+                beepSwitcher = false;
+            }
+            else{
+                beep2.play();
+                beepSwitcher = true;
+            }
+        }
+
+        function collisionDetection() {
+            for(col=0; col<theBrickColumns; col++) {
+                for(row=0; row<theBrickRows; row++) {
+                    var aBrick = theBricks[col][row];
+                    if(aBrick.status != 0) {
+                        if(ballX >= aBrick.x && ballX <= aBrick.x+theBrickWidth){
+                            //Is the ball within the X scope of the brick
+                            if( (ballY - aBrick.y) < ballRadius && (ballY - aBrick.y) > 0) {
+                                //Is it touching the bottom of the brick
+                                playBeeper();
+                                ballDY = -ballDY;
+                                aBrick.status = aBrick.status - 1;
+                                if(aBrick.status == 0)
+                                {
+                                    depletedBricks++;
+                                    console.log(depletedBricks);
+                                }
+                                score++;
+                                //console.log("Top");
+                            }
+                            else if ( (ballY - aBrick.y+theBrickHeight) < ballRadius && (ballY - aBrick.y+theBrickHeight) > 0) {
+                                                            //Is it touching the top of the brick
+                                playBeeper();
+                                ballDY = -ballDY;
+                                aBrick.status = aBrick.status - 1;
+                                if(aBrick.status == 0)
+                                {
+                                    depletedBricks++;
+                                    console.log(depletedBricks);
+                                }
+                                //console.log("Bottom");
+                                score++;
+                            }
+                            else if(ballY > aBrick.y && ballY < aBrick.y+theBrickHeight){
+                                //Is the ball touching the sides of the brick
+                                playBeeper();
+                                //console.log("BallY = " + ballY + ", Brick y = " + aBrick.y + " and " + aBrick.y+theBrickHeight);
+                                ballDX = -ballDX;
+                                aBrick.status = aBrick.status - 1;
+                                if(aBrick.status == 0)
+                                {
+                                    depletedBricks++;
+                                    console.log(depletedBricks);
+                                }
+                                score++;
+                            }
+
+                        }
+
+                        if(depletedBricks >= brickCap && gameOverScreenGood == false) {
+                                ballY = canvas.height/2;
+                                gameOverScreenGood = true;
+                                level++;
+                        }
+                    }
+                }
+            }
+        }
+
+        function styleText(txtColour, txtFont, txtAlign, txtBaseline)
+        {
+            canvasContext.fillStyle = txtColour;
+            canvasContext.font = txtFont;
+            canvasContext.textAlign = txtAlign;
+            canvasContext.textBaseline = txtBaseline;
+        }
+
+        function init() {
+
+            if (canvas.getContext) {
+            //Set Event Listeners for window, mouse and touch
+
+                window.addEventListener('resize', resizeCanvas, false);
+                window.addEventListener('orientationchange', resizeCanvas, false);
+
+                canvas.addEventListener("touchstart", touchDown, false);
+                canvas.addEventListener("touchmove", touchXY, true);
+                canvas.addEventListener("touchend", touchUp, false);
+                canvas.addEventListener('mousedown', mouseClick, true);
+                window.addEventListener('keydown',this.keyPress, false);
+
+                //mySoundPool = new SoundPool (MAX_NUMBER_STREAMS, AuudioManager.STREAM_MUUSIC, SOUURCE_QUALITY)
+
+                //Position ball ahead of bricks being built
+                ballX = (canvas.width/2)-ballRadius;
+                ballY = (canvas.height/5)*4;
+
+
+                document.body.addEventListener("touchcancel", touchUp, false);
+                resizeCanvas();
+                imageToDraw.src = "GreenBlock.png";
+                orangeBlock.src = "OrangeBlock.png";
+                redBlock.src = "RedBlock.png";
+                blueBall.src = "BlueBall.png";
+                paddleImg.src = "Paddle.png";
+                BGimg.src = "Background.jpg";
+
+                canvasContext.drawImage(BGimg,0, 0, canvas.width, canvas.height);
+                initBricks();
+            }
+        }
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+
+
+        function touchUp(evt) {
+            evt.preventDefault();
+            // Terminate touch path
+            lastPt=null;
+        }
+
+        function touchDown(evt) {
+            evt.preventDefault();
+
+            if(titleScreen){
+                titleScreen = false;
+                titleScreenMusic.pause();
+                gameMusic.play();
+                render()
+            }
+
+            if(gameOverScreenGood){
+                gameOverScreenGood = false;
+                render()
+            }
+
+            if(gameOverScreenBad){
+                gameOverScreenBad = false;
+                render();
+            }
+            touchXY(evt);
+        }
+
+        function touchXY(evt) {
+            evt.preventDefault();
+            if(lastPt!=null) {
+                var touchX = evt.touches[0].pageX - canvas.offsetLeft;
+                var touchY = evt.touches[0].pageY - canvas.offsetTop;
+                thePaddleX = touchX - (PADDLE_WIDTH/2);
+            }
+            lastPt = {x:evt.touches[0].pageX, y:evt.touches[0].pageY};
+        }
+
+        function mouseClick(evt){
+
+            if(titleScreen){
+                titleScreen = false;
+                titleScreenMusic.pause();
+                gameMusic.play();
+                render()
+            }
+
+            if(gameOverScreenGood){
+                gameOverScreenGood = false;
+                render()
+            }
+
+            if(gameOverScreenBad){
+                gameOverScreenBad = false;
+                render();
+            }
+
+            const pos = {
+                 x: evt.clientX,
+                 y: evt.clientY
+            };
+
+            thePaddleX = pos.x - (PADDLE_WIDTH/2);
+
+
+        }
+
+        function keyPress(evt){
+
+            //Exit title screen
+            if(titleScreen){
+                titleScreen = false;
+                titleScreenMusic.pause();
+                gameMusic.play();
+                render()
+            }
+
+            if(gameOverScreenGood){
+                gameOverScreenGood = false;
+                render()
+            }
+
+            if(gameOverScreenBad){
+                gameOverScreenBad = false;
+                render();
+            }
+
+            //If left arrow
+            if(evt.keyCode == 37){
+            //Move paddle left
+                thePaddleX -= canvas.width/12;
+
+                //Catch at edge of screen
+                if(thePaddleX < 0){
+                    thePaddleX = 0;
+                }
+            }
+
+            //if right arrow
+            if(evt.keyCode == 39){
+            //move paddle right
+                thePaddleX += canvas.width/12;
+
+                //Catch at screen edge
+                if(thePaddleX > canvas.width-PADDLE_WIDTH){
+
+                    thePaddleX = canvas.width-PADDLE_WIDTH;
+                }
+
+            }
+
+        }
+
+
+
+
+    </script>
+
+</body>
+</html>
